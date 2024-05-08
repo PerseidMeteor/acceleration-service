@@ -1,0 +1,55 @@
+# Configuration file of Harbor Acceleration Service
+
+# http related config
+server:
+  name: API
+  # listened host for http
+  host: 0.0.0.0
+  # port for http
+  port: 2077
+
+metric:
+  # export metrics on `/metrics` endpoint
+  enabled: true
+
+provider:
+  source:
+    # hostname of harbor service
+    10.68.49.26:8088:
+      # base64 encoded `<robot-name>:<robot-secret>` for robot
+      # account created in harbor
+      # auth: YTpiCg==
+      # skip verifying server certs for HTTPS source registry
+      auth: YWRtaW46YXNkYXNkag==
+      insecure: false
+      webhook:
+        # webhook request auth header configured in harbor
+        auth_header: yq
+    localhost:
+      auth: YWRtaW46SGFyYm9yMTIzNDU=
+    docker.io:
+      auth: YnJlZXpldHV0OjE1MDkxMTU0ODE0eXE=
+    registry-1.docker.io:
+      auth: YnJlZXpldHV0OjE1MDkxMTU0ODE0eXE=
+
+  # work directory of acceld
+  work_dir: /tmp
+  gcpolicy:
+      # size threshold that triggers GC, the oldest used blobs will be reclaimed if exceeds the size.
+      threshold: 1000MB
+
+converter:
+  # number of worker for executing conversion task
+  worker: 5
+  # enable to add harbor specified annotations to converted image for tracking.
+  harbor_annotation: true
+  # only convert images for specific platforms, leave empty for all platforms.
+  # platforms: linux/amd64,linux/arm64
+  driver:
+    # accelerator driver type: `estargz`
+    type: lion
+    config:
+      docker2oci: false
+  rules:
+    # add suffix to tag of source image reference as target image reference
+    - tag_suffix: -lion
