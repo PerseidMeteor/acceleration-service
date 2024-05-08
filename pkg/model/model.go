@@ -35,4 +35,12 @@ type EventData struct {
 // Resource describe infos of resource triggered notification
 type Resource struct {
 	ResourceURL string `json:"resource_url,omitempty"`
+	// ResourceTag string `json:"tag,omitempty"`
+	Resourcedigest string `json:"digest,omitempty"`
+}
+
+type AcorePayload struct {
+	Type      string     `json:"type"`
+	EventData *EventData `json:"event_data,omitempty"`
+	Args      string     `json:"args"`
 }

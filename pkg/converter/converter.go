@@ -181,6 +181,10 @@ func (cvt *Converter) Convert(ctx context.Context, source, target, cacheRef stri
 		logger.Infof("pushed cache %s", cacheRef)
 	}
 
+	// lion convert push image to registry by CHarbor API, don't need provider push
+	if cvt.driver.Name() == "lion" {
+		return &metric, nil
+	}
 	start = time.Now()
 	logger.Infof("pushing image %s", target)
 	if err := cvt.provider.Push(ctx, *desc, target); err != nil {

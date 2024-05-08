@@ -39,6 +39,8 @@ type Metric struct {
 	TargetPushElapsed time.Duration
 }
 
+const LightImageMediaType  = "application/vnd.squash.distribution.manifest.v1+json"
+
 func (metric *Metric) SetTargetImageSize(ctx context.Context, cvt *Converter, desc *ocispec.Descriptor) error {
 	var err error
 	metric.TargetImageSize, err = metric.imageSize(ctx, cvt.provider.ContentStore(), desc, cvt.platformMC)
@@ -81,6 +83,8 @@ func (metric *Metric) imageSize(ctx context.Context, cs content.Store, image *oc
 		for _, desc := range children {
 			imageSize += desc.Size
 		}
+	case LightImageMediaType:
+		imageSize = 0
 	default:
 		return imageSize, fmt.Errorf("unknown descriptor type %s", image.MediaType)
 	}

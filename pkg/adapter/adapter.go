@@ -31,6 +31,7 @@ import (
 	"github.com/goharbor/acceleration-service/pkg/metrics"
 	"github.com/goharbor/acceleration-service/pkg/platformutil"
 	"github.com/goharbor/acceleration-service/pkg/task"
+	"github.com/goharbor/acceleration-service/pkg/meta"
 )
 
 var dispatchSingleflight = &singleflight.Group{}
@@ -79,6 +80,11 @@ func NewLocalAdapter(cfg *config.Config) (*LocalAdapter, error) {
 
 	if err := task.Manager.Init(cfg.Provider.WorkDir); err != nil {
 		return nil, errors.Wrap(err, "task manager init")
+	}
+
+	// append for lion driver, which is for yq' graduate project
+	if err := meta.FileManager.Init(cfg.Provider.WorkDir); err != nil {
+		return nil, errors.Wrap(err, "meta manager init")
 	}
 
 	worker, err := NewWorker(cfg.Converter.Worker)

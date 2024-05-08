@@ -14,7 +14,13 @@
 
 package util
 
-import "github.com/labstack/echo/v4"
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+
+	"github.com/labstack/echo/v4"
+)
 
 type ErrorResp struct {
 	Code    string `json:"code"`
@@ -27,4 +33,32 @@ func ReplyError(ctx echo.Context, status int, err error, message string) error {
 		Message: message,
 	}
 	return ctx.JSON(status, resp)
+}
+
+type Opt struct {
+	Args string `json:"args"`
+	Arch string `json:"arch"`
+	Libs []string `json:"libs"`
+	WorkPath string `json:"workpath"`
+}
+
+func CreateJson(filepath string, opt Opt) error {
+	// 创建或打开文件
+	file, err := os.Create(filepath)
+	if err != nil {
+		fmt.Println("创建失败")
+		return err
+	}
+	fmt.Println("创建成功")
+	defer file.Close()
+
+	// 创建 JSON 编码器并将数据编码到文件
+	encoder := json.NewEncoder(file)
+	err = encoder.Encode(opt)
+	if err != nil {
+		fmt.Println("打开失败")
+		return err
+	}
+	
+	return nil
 }

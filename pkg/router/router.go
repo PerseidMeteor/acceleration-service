@@ -43,8 +43,11 @@ func NewLocalRouter(handler handler.Handler) Router {
 
 func (router *LocalRouter) Register(server *echo.Echo) error {
 	server.POST("/api/v1/conversions", router.CreateTask)
+	server.POST("//api/v1/conversions", router.CreateTask)
 	server.GET("/api/v1/conversions", router.ListTask)
 	server.GET("/api/v1/health", router.CheckHealth)
+	server.GET("/file/*", router.FetchFile)
+	server.GET("/meta", router.ListMeta)
 
 	// Any unexpected endpoint will return an error.
 	server.Any("*", func(ctx echo.Context) error {

@@ -23,6 +23,7 @@ import (
 
 	"github.com/goharbor/acceleration-service/pkg/content"
 	"github.com/goharbor/acceleration-service/pkg/driver/estargz"
+	"github.com/goharbor/acceleration-service/pkg/driver/lion"
 	"github.com/goharbor/acceleration-service/pkg/driver/nydus"
 )
 
@@ -52,6 +53,8 @@ func NewLocalDriver(typ string, config map[string]string, platformMC platforms.M
 		return nydus.New(config, platformMC)
 	case "estargz":
 		return estargz.New(config, platformMC)
+	case "lion":
+		return lion.New(config, platformMC)
 	default:
 		return nil, fmt.Errorf("unsupported driver %s", typ)
 	}
