@@ -122,7 +122,7 @@ func UploadConfig(config ocispec.ImageConfig, registryURL, imageName string) err
 }
 
 // UploadManifest uploads a manifest to an OCI image registry
-func UploadManifest(manifest *ocispec.Manifest, registryURL, imageName string) error {
+func UploadManifest(manifest *ocispec.Manifest, host, ref, tag string) error {
 	// Marshal the manifest into JSON
 	manifestBytes, err := json.Marshal(manifest)
 	if err != nil {
@@ -131,22 +131,8 @@ func UploadManifest(manifest *ocispec.Manifest, registryURL, imageName string) e
 
 	logrus.Infof("Manifest JSON: %s", string(manifestBytes))
 
-	// Parse the image name and extract the tag
-	ref, err := reference.ParseNormalizedNamed(imageName)
-	if err != nil {
-		return errors.Wrap(err, "failed to parse image reference")
-	}
-
-	taggedRef, ok := ref.(reference.Tagged)
-	if !ok {
-		return fmt.Errorf("image reference is not tagged")
-	}
-
-	tag := taggedRef.Tag()
-	logrus.Infof("Tag: %s", tag)
-
 	// Construct the URL for the PUT request
-	putManifestURL := fmt.Sprintf("%s%s/manifests/%s", registryURL, reference.Path(ref), tag)
+	putManifestURL := fmt.Sprintf("%s%s/manifests/%s", host, ref, tag)
 	logrus.Infof("PUT URL: %s", putManifestURL)
 
 	// Create the HTTP request for uploading the manifest
@@ -172,4 +158,20 @@ func UploadManifest(manifest *ocispec.Manifest, registryURL, imageName string) e
 
 	logrus.Info("Manifest uploaded successfully")
 	return nil
+}
+
+func ObtainDomainAndTag(refer string) (string, string, error) {
+	logrus.Infoln("obtainDomainAndTag")
+	// Parse the image name and extract the tag
+	ref, err := reference.ParseNormalizedNamed(refer)
+	if err != nil {
+		return "", "", errors.Wrap(err, "failed to parse image reference")
+	}
+
+	taggedRef, ok := ref.(reference.Tagged)
+	if !ok {
+		return "", "", fmt.Errorf("image reference is not tagged")
+	}
+
+	return reference.Path(ref), taggedRef.Tag(), nil
 }

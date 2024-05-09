@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/goharbor/acceleration-service/pkg/server/util"
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
 
@@ -125,16 +126,15 @@ func createSlimImage(image, target, action, dir string, httpProbe bool) (error) 
 
 	location := matches[1] + "/files.tar"
 
-	// if err := os.RemoveAll(dir); err != nil {
-	// 	return nil
-	// }
-	// if err := os.Mkdir(dir, 0755); err != nil {
-	// 	return nil
-	// }
-	untarCmd := fmt.Sprintf("tar -xvf %s -C %s", location, dir)
+	// create slim dir
+	slimDir := filepath.Join(dir, "slim")
+	if err := os.MkdirAll(slimDir, 0755); err != nil {
+		return errors.Wrap(err, "create slim dir")
+	}
+	untarCmd := fmt.Sprintf("tar -xvf %s -C %s", location, slimDir)
 	output = RunWithOutput(untarCmd)
 
-	logrus.Infoln("输出：",output)
+	logrus.Infoln("解压tar输出：",output)
 	return nil
 }
 

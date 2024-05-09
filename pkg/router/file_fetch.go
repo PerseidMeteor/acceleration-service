@@ -9,10 +9,11 @@ import (
 	"github.com/goharbor/acceleration-service/pkg/meta"
 	"github.com/goharbor/acceleration-service/pkg/profiling"
 	"github.com/labstack/echo/v4"
+	"github.com/sirupsen/logrus"
 )
 
 func (r *LocalRouter) FetchFile(ctx echo.Context) error {
-	
+
 	uri := ctx.Request().RequestURI
 	fileName := strings.TrimPrefix(uri, "/file/upperdir/")
 	logger.Infof("request filepath %s", fileName)
@@ -22,21 +23,18 @@ func (r *LocalRouter) FetchFile(ctx echo.Context) error {
 	if err != nil {
 		return ctx.JSON(http.StatusBadRequest, err)
 	}
-	logger.Infof("查找地址 %s",metaPath)
+	logger.Infof("metaPath查找地址 %s", metaPath)
 
-	
-
-	finalPath := filepath.Join(metaPath, fileName)
-
-	if exists, err := isPathExists(finalPath); err != nil && exists{
+	realPath := filepath.Join(metaPath, fileName)
+	logrus.Infof("realPath: %s", realPath)
+	if exists, err := isPathExists(realPath); err == nil && exists {
 		// add file into slim image
-		profiling.Profiler.Profile(imageMeta.Path, finalPath)	
+		if err = profiling.Profiler.Profile(imageMeta.Path, realPath); err != nil {
+			logrus.Fatalln("profiling:", err)
+		}
 	}
-	
-	logger.Info(imageMeta.Path, "------------",finalPath)
-	logger.Infoln("地址为", finalPath)
 
-	return ctx.File(finalPath)
+	return ctx.File(realPath)
 }
 
 func (r *LocalRouter) ListMeta(ctx echo.Context) error {

@@ -80,10 +80,14 @@ func (d *Driver) Convert(ctx context.Context, p content.Provider, ref string) (*
 		return nil, err
 	}
 
+	imageRef, tag, err := ObtainDomainAndTag(targetRef)
+	if err != nil {
+		return nil, errors.Wrap(err, "obtain domain and tag")
+	}
 	// just push data layer to remote
 	logrus.Infoln("start upload layer")
 	for _, layer := range layerPaths {
-		if err = UploadLayer(host, targetRef, layer); err != nil {
+		if err = UploadLayer(host, imageRef, layer); err != nil {
 			return nil, err
 		}
 	}
@@ -92,8 +96,8 @@ func (d *Driver) Convert(ctx context.Context, p content.Provider, ref string) (*
 	// if err = uploadConfig(*config, host, targetRef); err != nil {
 	// 	return nil, err
 	// }
-
-	if err = UploadManifest(manifest, host, targetRef); err != nil {
+	
+	if err = UploadManifest(manifest, host, imageRef, tag); err != nil {
 		return nil, err
 	}
 
@@ -178,9 +182,11 @@ func (d *Driver) CreateManifestAndConfig(ctx context.Context, p content.Provider
 
 	manifest.Config = *imageConfigDesc
 	manifest.MediaType = LightImageMediaType
+	// clear original layers of original image
+	manifest.Layers = []ocispec.Descriptor{}
 	manifest.Layers = append(manifest.Layers, layers...)
 
-	//write manifest to blob, for later push
+	// write manifest to blob, for later push
 	manifestDesc, manifestBytes, err := MarshalToDesc(manifest, LightImageMediaType)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "marshal remote cache image config")
