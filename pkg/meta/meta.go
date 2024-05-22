@@ -3,6 +3,7 @@ package meta
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -10,16 +11,18 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
-
-	// "github.com/sirupsen/logrus"
 	bolt "go.etcd.io/bbolt"
 )
 
-var bucketObjectFiles = []byte("files")
+var bucketObjectNodes = []byte("nodes")
 
-const StatusProcessing = "PROCESSING"
+const NodeMaximumKeepPeriod = time.Hour * 24
 
-const metaMaximumKeepPeriod = time.Hour * 24
+const NodeStatusProcessing = "PROCESSING"
+const NodeStatusCompleted = "COMPLETED"
+const NodeStatusFailed = "FAILED"
+
+// const metaMaximumKeepPeriod = time.Hour * 24
 
 const metaStatusProcessing = "PROCESSING"
 const metaStatusCompleted = "COMPLETED"
@@ -27,146 +30,167 @@ const metaStatusFailed = "FAILED"
 
 // meta for uncompress image info
 type Meta struct {
-	ID          string    `json:"id"`           //ID
-	Image       string    `json:"image"`        //镜像
-	IsProfiling bool      `json:"is_profiling"` //是否扩充过
-	Name        string    `json:"name"`         //名称
-	Path        string    `json:"path"`         //工作路径，用于将对文件的获取，重定向至此地址
-	DataPath    string    `json:"data_path"`    //数据层地址，用于后续向数据层更新、添加文件
-	Status      string    `json:"status"`       //状态
-	Created     time.Time `json:"created"`      //创建时间
-	Finished    time.Time `json:"finished"`     //结束时间
+	ID             string    `json:"id"`              //ID
+	Image          string    `json:"image"`           //镜像
+	IsProfiling    bool      `json:"is_profiling"`    //是否扩充过
+	Path           string    `json:"path"`            //工作路径，用于将对文件的获取，重定向至此地址
+	UncompressDirs []string  `json:"uncompress_dirs"` //数据层地址，用于后续向数据层更新、添加文件
+	Status         string    `json:"status"`          //状态
+	Created        time.Time `json:"created"`         //创建时间
+	Finished       time.Time `json:"finished"`        //结束时间
 }
 
-type fileManager struct {
-	mutex sync.Mutex
-	db    *bolt.DB
-	metas map[string]*Meta
+// Node for node info
+type Node struct {
+	ID      string           `json:"id"`      // ID
+	Name    string           `json:"name"`    // node name
+	Metas   map[string]*Meta `json:"metas"`   // image meta data on node, key is image reference, value is image meta dir
+	Path    string           `json:"path"`    // share layer path
+	Status  string           `json:"status"`  // node status
+	Created time.Time        `json:"created"` // create time
+	Updated time.Time        `json:"updated"` // update time
 }
 
-var FileManager *fileManager
+type nodeManager struct {
+	mutex   sync.Mutex
+	db      *bolt.DB
+	nodes   map[string]*Node
+	nodeDir string
+}
+
+var NodeManager *nodeManager
 
 func init() {
-	FileManager = &fileManager{
+	NodeManager = &nodeManager{
 		mutex: sync.Mutex{},
-		metas: make(map[string]*Meta),
+		nodes: make(map[string]*Node),
 	}
 }
 
-func (m *Meta) IsExpired() bool {
-	if m.Status != StatusProcessing &&
-		time.Now().After(m.Finished.Add(metaMaximumKeepPeriod)) {
+func (n *Node) IsExpired() bool {
+	if n.Status != NodeStatusProcessing &&
+		time.Now().After(n.Updated.Add(NodeMaximumKeepPeriod)) {
 		return true
 	}
 	return false
 }
 
 // Init manager supported by boltdb.
-func (m *fileManager) Init(workDir string) error {
-	bdb, err := bolt.Open(filepath.Join(workDir, "files.db"), 0655, nil)
+func (m *nodeManager) Init(workDir string, nodeDir string) error {
+	// create node dir
+	if err := os.MkdirAll(nodeDir, 0755); err != nil {
+		return errors.Wrap(err, "create node dir")
+	}
+
+	bdb, err := bolt.Open(filepath.Join(workDir, "nodes.db"), 0655, nil)
 	if err != nil {
-		return errors.Wrap(err, "create meta database")
+		return errors.Wrap(err, "create node database")
 	}
 	m.db = bdb
+	m.nodeDir = nodeDir
 	return m.initDatabase()
 }
 
-// initDatabase loads metas from the database into memory.
-func (m *fileManager) initDatabase() error {
+// initDatabase loads nodes from the database into memory.
+func (m *nodeManager) initDatabase() error {
 	return m.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte("files"))
+		bucket := tx.Bucket([]byte("nodes"))
 		if bucket == nil {
 			return nil
 		}
 
 		return bucket.ForEach(func(k, v []byte) error {
-			var meta Meta
-			if err := json.Unmarshal(v, &meta); err != nil {
+			var node Node
+			if err := json.Unmarshal(v, &node); err != nil {
 				return err
 			}
-			// if meta.Status == StatusProcessing {
-			// 	return bucket.Delete([]byte(meta.ID))
+			// if node.Status == NodeStatusProcessing {
+			// 	return bucket.Delete([]byte(node.ID))
 			// }
-			m.metas[meta.ID] = &meta
+			m.nodes[node.ID] = &node
 			return nil
 		})
 	})
 }
 
-// updateBucket updates meta in bucket and creates a new bucket if it doesn't already exist.
-func (m *fileManager) updateBucket(meta *Meta) error {
+// updateBucket updates node in bucket and creates a new bucket if it doesn't already exist.
+func (m *nodeManager) updateBucket(node *Node) error {
 	return m.db.Update(func(tx *bolt.Tx) error {
-		bucket, err := tx.CreateBucketIfNotExists(bucketObjectFiles)
+		bucket, err := tx.CreateBucketIfNotExists(bucketObjectNodes)
 		if err != nil {
 			return err
 		}
 
-		metaJSON, err := json.Marshal(meta)
+		nodeJSON, err := json.Marshal(node)
 		if err != nil {
 			return err
 		}
 
-		return bucket.Put([]byte(meta.ID), metaJSON)
+		return bucket.Put([]byte(node.ID), nodeJSON)
 	})
 }
 
-// deleteBucket deletes a meta in bucket
-func (m *fileManager) deleteBucket(metaID string) error {
+// deleteBucket deletes a node in bucket
+func (m *nodeManager) deleteBucket(nodeID string) error {
 	return m.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(bucketObjectFiles)
+		bucket := tx.Bucket(bucketObjectNodes)
 		if bucket == nil {
 			return nil
 		}
-		return bucket.Delete([]byte(metaID))
+		return bucket.Delete([]byte(nodeID))
 	})
 }
 
-// Create meta data for image
-func (m *fileManager) Create(source, path string) (string, error) {
+// Create node data
+func (m *nodeManager) Create(name string) (string, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
 	id := uuid.NewString()
+	path := filepath.Join(m.nodeDir, name)
+	if err := os.MkdirAll(path, 0755); err != nil {
+		return "", errors.Wrap(err, "create node dir")
+	}
 
-	meta := &Meta{
+	node := &Node{
 		ID:      id,
-		Image:   source,
-		Name:    source,
+		Name:    name,
+		Metas:   map[string]*Meta{},
 		Path:    path,
 		Created: time.Now(),
-		Status:  metaStatusProcessing,
+		Updated: time.Now(),
+		Status:  NodeStatusProcessing,
 	}
-	m.metas[id] = meta
-	if err := m.updateBucket(meta); err != nil {
+	m.nodes[id] = node
+	if err := m.updateBucket(node); err != nil {
 		return "", err
 	}
-	m.metas[id] = meta
+	m.nodes[id] = node
 	return id, nil
 }
 
-func (m *fileManager) Finish(id string, err error) error {
+func (m *nodeManager) Finish(id string, err error) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	// Update meta status.
-	meta := m.metas[id]
-	if meta != nil {
+	// Update node status.
+	node := m.nodes[id]
+	if node != nil {
 		if err != nil {
-			meta.Status = metaStatusFailed
-			// meta.Reason = err.Error()
+			node.Status = NodeStatusFailed
 		} else {
-			meta.Status = metaStatusCompleted
+			node.Status = NodeStatusCompleted
 		}
-		meta.Finished = time.Now()
+		node.Updated = time.Now()
 	}
-	if err := m.updateBucket(meta); err != nil {
+	if err := m.updateBucket(node); err != nil {
 		return err
 	}
 
-	// Evict expired metas.
-	for id, meta := range m.metas {
-		if meta.IsExpired() {
-			delete(m.metas, id)
+	// Evict expired nodes.
+	for id, node := range m.nodes {
+		if node.IsExpired() {
+			delete(m.nodes, id)
 			if err := m.deleteBucket(id); err != nil {
 				return err
 			}
@@ -175,32 +199,78 @@ func (m *fileManager) Finish(id string, err error) error {
 	return nil
 }
 
-func (m *fileManager) List() []*Meta {
+func (m *nodeManager) List() []*Node {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	metas := make([]*Meta, 0)
-	for _, meta := range m.metas {
-		metas = append(metas, meta)
+	nodes := make([]*Node, 0)
+	for _, node := range m.nodes {
+		nodes = append(nodes, node)
 	}
 
-	sort.Slice(metas, func(i, j int) bool {
-		return metas[i].Created.After(metas[j].Created)
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodes[i].Created.After(nodes[j].Created)
 	})
 
-	return metas
+	return nodes
 }
 
-// Find file uncompress
-func (m *fileManager) Find(ref, filePath string) (*Meta, string, error) {
+// Find node with node name and return node id and node path string
+// TODO: fix later
+func (m *nodeManager) Find(node string) (string, string, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	for _, meta := range m.metas {
-		if meta.Image == ref {
-			return meta, meta.Path, nil
+	for _, n := range m.nodes {
+		if n.Name == node {
+			return n.ID, n.Path, nil
 		}
 	}
 
-	return nil, "", fmt.Errorf("obtain image %s file %s", ref, filePath)
+	return "", "", fmt.Errorf("obtain image %s", node)
+}
+
+// Append image record to node
+func (m *nodeManager) AppendImagetoNode(nodeID, image, metaDir string, dataPath []string) error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	node := m.nodes[nodeID]
+	id := uuid.NewString()
+
+	meta := Meta{
+		ID:             id,
+		Image:          image,
+		Path:           metaDir,
+		UncompressDirs: dataPath,
+		Created:        time.Now(),
+		Status:         metaStatusProcessing,
+	}
+
+	node.Metas[image] = &meta
+
+	// write node to bucket
+	return m.updateBucket(node)
+}
+
+func (m *nodeManager) ObtainMetaAndUcp(nodeName, ref, file string) (string, []string, error) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	var nodeID string
+	for _, n := range m.nodes {
+		if n.Name == nodeName {
+			nodeID = n.ID
+		}
+	}
+	node := m.nodes[nodeID]
+	if node == nil {
+		return "", nil, fmt.Errorf("no such node %s", nodeName)
+	}
+
+	meta := node.Metas[ref]
+	if meta == nil {
+		return "", nil, fmt.Errorf("no such refernece %s meta ", ref)
+	}
+	return meta.Path, meta.UncompressDirs, nil
 }

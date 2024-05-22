@@ -49,6 +49,9 @@ converter:
     # accelerator driver type: `estargz`
     type: lion
     config:
+      # workdir for lion converter
+      work_dir: /tmp/node
+
       docker2oci: false
   rules:
     # add suffix to tag of source image reference as target image reference

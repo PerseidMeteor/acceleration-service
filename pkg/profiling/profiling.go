@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	// "strings"
 
 	"github.com/goharbor/acceleration-service/pkg/driver/lion"
+	"github.com/goharbor/acceleration-service/pkg/meta"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -21,20 +23,20 @@ type profiler struct {
 	Path string
 }
 
-func (p *profiler) Profile(metaPath, file string) error {
+func (p *profiler) Profile(nodeName, ref, file string) error {
 	logrus.Infoln("Profile start")
-	layers, path, err := p.profileLayer(metaPath, file)
+
+	layers, path, err := p.profileLayer(nodeName, ref, file)
 	if err != nil {
 		return errors.Wrap(err, "profile layer")
 	}
 
-	fullRef := "10.68.49.26:8000/library/ubuntu:18.04-slim"
-	host, err := lion.GetHost(fullRef)
+	host, err := lion.GetHost(ref)
 	if err != nil {
 		return errors.Wrap(err, "get reference host")
 	}
 
-	ref, tag, err := lion.ObtainDomainAndTag(fullRef)
+	ref, tag, err := lion.ObtainDomainAndTag(ref)
 	if err != nil {
 		return errors.Wrap(err, "obtain domain and tag")
 	}
@@ -115,24 +117,31 @@ func (p *profiler) profileManifest(manifest *ocispec.Manifest, layer []ocispec.D
 	return manifest, nil
 }
 
-func (p *profiler) profileLayer(path, file string) ([]ocispec.Descriptor, []string, error) {
+// profileLayer just make file into share layer or runtime layer, and update meta data of image
+func (p *profiler) profileLayer(nodeName, ref, file string) ([]ocispec.Descriptor, []string, error) {
 	logrus.Infof("profile Layer")
 
-	logrus.Infof("Profile, 元数据地址: %s, file 文件: %s", path, file)
-	// 构建目标路径
-	metaDir := filepath.Dir(path)
-	destPath := filepath.Join(metaDir, "slim", filepath.Base(file))
-
-	// 复制文件到目标路径
-	err := copyFile(file, destPath)
+	_, nodePath, err := meta.NodeManager.Find(nodeName)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "copy file")
+		return nil, nil, errors.Wrap(err, "obtain node")
 	}
 
-	// 构建相对路径
-	relPath, err := filepath.Rel(metaDir, destPath)
+	metaDir, uncompressDirs, err := meta.NodeManager.ObtainMetaAndUcp(nodeName, ref, file)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "get relative path")
+		return nil, nil, errors.Wrap(err, "obtain meta path")
+	}
+
+	relPath, err := filepath.Rel(uncompressDirs[0], file)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "obtain rel path")
+	}
+	destPath := filepath.Join(filepath.Dir(uncompressDirs[0]), "slim", relPath)
+	
+	logrus.Infof("Profile, 元数据地址: %s, file 文件: %s", metaDir, file)
+
+	// 复制文件到目标路径
+	if err = copyFile(file, destPath);err != nil {
+		return nil, nil, errors.Wrap(err, "copy file")
 	}
 
 	// 读取或创建 meta.json 文件
@@ -160,22 +169,24 @@ func (p *profiler) profileLayer(path, file string) ([]ocispec.Descriptor, []stri
 		return nil, nil, errors.Wrap(err, "write meta.json")
 	}
 
-	squashDataPath := filepath.Join(filepath.Dir(path), "data.squashfs")
+	if err = meta.Refactor(nodePath); err != nil {
+		return nil, nil, errors.Wrap(err, "refactor image and layer")
+	}
+
+	squashDataPath := filepath.Join(metaDir, "data.squashfs")
 	if err := os.Remove(squashDataPath); err != nil && !os.IsNotExist(err) {
 		return nil, nil, errors.Wrap(err, "remove original squash layer")
 	}
-	// go to last dir and get <slim> dir, 
-	// example as /tmp/<convert dir>/<uncompress dir> to /tmp/<convert dir>/slim
 	
-	slimPath := filepath.Join(filepath.Dir(filepath.Clean(path)), "slim")
-
+	
+	slimPath := filepath.Join(metaDir, "slim")
 	cmd := fmt.Sprintf("mksquashfs %s %s", slimPath, squashDataPath)
 	lion.RunWithOutput(cmd)
 
 	layerFile, err := os.Open(squashDataPath)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "open squashfs data")
-	}
+	} 
 	defer layerFile.Close()
 
 	// Read all data from the file

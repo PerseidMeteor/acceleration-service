@@ -15,22 +15,13 @@
 package router
 
 import (
-	// "context"
 	"encoding/json"
 	"io"
 	"net/http"
-	"os"
-
-	// "os"
-	// "path/filepath"
-
-	// "net/url"
 	"strconv"
 	"strings"
 
-	// "github.com/goharbor/acceleration-service/pkg/meta"
 	"github.com/goharbor/acceleration-service/pkg/model"
-	// "github.com/goharbor/acceleration-service/pkg/task"
 	"github.com/labstack/echo/v4"
 
 	"github.com/goharbor/acceleration-service/pkg/errdefs"
@@ -50,30 +41,27 @@ func (r *LocalRouter) CreateTask(ctx echo.Context) error {
 
 	m := model.AcorePayload{}
 	if err := json.Unmarshal(b, &m); err != nil {
-		logger.Errorf("解析失败")
+		logger.Errorf("WebHook payload 解析失败")
 		return ctx.JSON(http.StatusBadRequest, "FAILED")
 	}
-	
 	logger.Infoln("删减镜像:", m.EventData.Resources[0].ResourceURL)
-	logger.Infoln("参数：", m.Args)	
+	logger.Infoln("启动参数：", m.Args)	
 	
-	tmpdir, err := os.MkdirTemp("", "lion")
-	if err != nil {
-		return ctx.JSON(http.StatusInternalServerError, "FAILED")
-	}
-	logger.Infoln("TMP 工作目录为", tmpdir)
+	// tmpdir, err := os.MkdirTemp(os.TempDir(), "lion")
+	// if err != nil {
+	// 	return ctx.JSON(http.StatusInternalServerError, "FAILED")
+	// }
+	// logger.Infoln("TMP 工作目录为", tmpdir)
 
 	opt := util.Opt{
 		Args: m.Args,
-		WorkPath: tmpdir,
+		// WorkPath: tmpdir,
 	}
 	
 	filepath := "/tmp/acc.json"
 	if err := util.CreateJson(filepath, opt); err != nil {
 		return err
 	}
-
-	
 
 	ref := strings.ReplaceAll(m.EventData.Resources[0].ResourceURL, "8000", "8088")
 	if err := r.handler.Convert(ctx.Request().Context(), ref, sync); err != nil {

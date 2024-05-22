@@ -83,8 +83,9 @@ func NewLocalAdapter(cfg *config.Config) (*LocalAdapter, error) {
 	}
 
 	// append for lion driver, which is for yq' graduate project
-	if err := meta.FileManager.Init(cfg.Provider.WorkDir); err != nil {
-		return nil, errors.Wrap(err, "meta manager init")
+	// TODO: make node dir configurable
+	if err := meta.NodeManager.Init(cfg.Provider.WorkDir, "/tmp/node"); err != nil {
+		return nil, errors.Wrap(err, "node manager init")
 	}
 
 	worker, err := NewWorker(cfg.Converter.Worker)

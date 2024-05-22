@@ -21,7 +21,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
-	metaManager "github.com/goharbor/acceleration-service/pkg/meta"
+	meta "github.com/goharbor/acceleration-service/pkg/meta"
 )
 
 const (
@@ -30,28 +30,38 @@ const (
 )
 
 type Driver struct {
-	cfg        map[string]string
+	workDir string
 	platformMC platforms.MatchComparer
 }
 
 func New(cfg map[string]string, platformMC platforms.MatchComparer) (*Driver, error) {
-	return &Driver{cfg, platformMC}, nil
+	workDir := cfg["work_dir"]
+
+	return &Driver{
+		workDir: workDir,
+		platformMC: platformMC,
+	}, nil
 }
 
 func (d *Driver) Convert(ctx context.Context, p content.Provider, ref string) (*ocispec.Descriptor, error) {
 	logrus.Infoln("Start lion convert")
 
-	targetRef := ref + "-slim"
+	targetRef := ref + "-lion"
 
-	filepath := "/tmp/acc.json"
-	opt, err := GetSlimOpt(filepath)
+	optFilePath := "/tmp/acc.json"
+	opt, err := GetSlimOpt(optFilePath)
 	if err != nil {
 		return nil, err
 	}
-	tmpdir := opt.WorkPath
-	logrus.Infoln("lion converter:TMP工作目录为", tmpdir)
+	//TODO: node name is A
+	nodeName := "A"
+	currentWorkDir, err := d.prepareCurrentWorkDir(d.workDir, nodeName)
+	if err != nil {
+		return nil, errors.Wrap(err, "prepare current work dir")
+	}
+	logrus.Infof("convert image %s at dir %s\n", ref, currentWorkDir)
 
-	filePath, err := DynamicConvert(ref, targetRef, tmpdir, opt)
+	filePath, err := DynamicConvert(ref, targetRef, currentWorkDir, opt)
 	if err != nil {
 		return nil, err
 	}
@@ -59,11 +69,9 @@ func (d *Driver) Convert(ctx context.Context, p content.Provider, ref string) (*
 
 	// StaticConvert(ref, targetRef)
 
-	refactor()
-
 	targetRef = strings.ReplaceAll(targetRef, "8088", "8000")
 
-	layers, layerPaths, err := CreateSquashFSLayers(tmpdir, filePath)
+	layers, layerPaths, err := CreateSquashFSLayers(currentWorkDir, filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -96,18 +104,18 @@ func (d *Driver) Convert(ctx context.Context, p content.Provider, ref string) (*
 	// if err = uploadConfig(*config, host, targetRef); err != nil {
 	// 	return nil, err
 	// }
-	
+
 	if err = UploadManifest(manifest, host, imageRef, tag); err != nil {
 		return nil, err
 	}
 
 	// uncompress image from tar.gz for lazy pull
-	err = GenerateMetaForDir(tmpdir)
+	err = GenerateMetaForDir(currentWorkDir)
 	if err != nil {
 		return nil, errors.Wrap(err, "get layers meta")
 	}
 
-	uncompressDirs, err := uncompress(ctx, p, ref, tmpdir)
+	uncompressDirs, err := uncompress(ctx, p, ref, currentWorkDir)
 	if err != nil {
 		return nil, errors.Wrap(err, "uncompress layers")
 	}
@@ -116,7 +124,25 @@ func (d *Driver) Convert(ctx context.Context, p content.Provider, ref string) (*
 		return nil, errors.Wrap(err, "get layers meta")
 	}
 
-	metaManager.FileManager.Create(ref, uncompressDirs[0])
+	// if _, err = meta.FileManager.Create(ref, uncompressDirs[0]); err != nil {
+	// 	return nil, errors.Wrap(err, "create file meta")
+	// }
+	// search node for profiling image files
+	var nodeID string
+	if nodeID, _, err = meta.NodeManager.Find("A"); err != nil {
+		// node does not exists, make node workdir and create node info
+		// TODO: change A to programable
+		if nodeID, err = meta.NodeManager.Create("A"); err != nil {
+			return nil, errors.Wrap(err, "create node meta")
+		}
+	}
+	// oriFile := filepath.Join(currentWorkDir, "slimMeta.json")
+
+	if err := meta.NodeManager.AppendImagetoNode(nodeID, targetRef, currentWorkDir, uncompressDirs); err != nil {
+		return nil, errors.Wrap(err, "append image to node")
+	}
+
+	// meta.Refactor()
 
 	manifestDesc, _, err := MarshalToDesc(manifest, LightImageMediaType)
 	if err != nil {
@@ -212,6 +238,26 @@ func (d *Driver) CreateConfig(ctx context.Context, p content.Provider, sourceCon
 	newConfig := sourceConfig
 	newConfig.Cmd = []string{opt.Args}
 	return &sourceConfig, nil
+}
+
+
+func (d *Driver) prepareCurrentWorkDir(workdir, nodeName string) (string, error) {
+	// check if workdir exists, create if not exists
+	metaDir := filepath.Join(workdir, nodeName)
+	if _, err := os.Stat(metaDir); err != nil {
+		if os.IsNotExist(err) {
+			if err := os.MkdirAll(metaDir, 0755); err != nil {
+				return "", errors.Wrap(err, "create metaDir")
+			}
+		}else {
+			 	return "", errors.Wrap(err, "stat meta dir")
+		}
+	}
+	currentWorkDir, err := os.MkdirTemp(metaDir, "lion")
+	if err != nil {
+		return "", errors.Wrap(err, "create current work dir")
+	}
+	return currentWorkDir, nil
 }
 
 func MarshalToDesc(data interface{}, mediaType string) (*ocispec.Descriptor, []byte, error) {
@@ -392,3 +438,4 @@ func walkDir(dir string, fileName string) error {
 
 	return nil
 }
+

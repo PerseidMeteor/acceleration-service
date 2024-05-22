@@ -101,10 +101,10 @@ func createSlimImage(image, target, action, dir string, httpProbe bool) (error) 
 		useHttpProbe = "false"
 	}
 	
-	if image == "10.68.49.26:8088/library/ubuntu:18.04" {
-		useHttpProbe = "false"
-	}else{
+	if image == "10.68.49.26:8088/library/nginx:latest" {
 		useHttpProbe = "true"
+	}else{
+		useHttpProbe = "false"
 	}
 
 	createSlimCmd := fmt.Sprintf("slim build --target %s --tag %s --http-probe=%s --exec \"%s\"", image, target, useHttpProbe, action)
